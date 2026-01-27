@@ -24,12 +24,12 @@ DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', 'sk-4931733156ef421ab94c74a5afe
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-(+$@p#@ni_0&5o_p-+p%0tb52y=n=-zrm6gq259pww(4o2=ft@'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-(+$@p#@ni_0&5o_p-+p%0tb52y=n=-zrm6gq259pww(4o2=ft@')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['charmifyai.com', 'www.charmifyai.com', '98.91.73.232', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -136,9 +136,17 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
     BASE_DIR.parent / 'frontend' / 'dist',
 ]
+
+# Security settings for production
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = False  # Nginx handles this
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -147,6 +155,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'https://charmifyai.com',
+    'https://www.charmifyai.com',
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    'https://charmifyai.com',
+    'https://www.charmifyai.com',
 ]
 
 # REST Framework settings
