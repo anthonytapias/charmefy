@@ -12,6 +12,8 @@ const ProfilePage = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [subscription, setSubscription] = useState(null);
+  const [subLoading, setSubLoading] = useState(false);
 
   const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
@@ -25,6 +27,15 @@ const ProfilePage = () => {
 
   useEffect(() => {
     fetchProfile();
+    fetchSubscription();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'subscription') {
+      setActiveTab('subscription');
+    }
+    if (params.get('status') === 'success') {
+      setSuccess('Subscription activated successfully!');
+    }
   }, []);
 
   const fetchProfile = async () => {
@@ -63,6 +74,70 @@ const ProfilePage = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSubscription = async () => {
+    const token = getToken();
+    if (!token) return;
+
+    try {
+      const response = await fetch('/api/stripe/subscription-status/', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSubscription(data);
+      }
+    } catch (err) {
+      console.error('Error fetching subscription:', err);
+    }
+  };
+
+  const handleUpgrade = async () => {
+    setSubLoading(true);
+    try {
+      const response = await fetch('/api/stripe/create-checkout-session/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`,
+        },
+      });
+      const data = await response.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        setError(data.error || 'Failed to start checkout');
+      }
+    } catch (err) {
+      setError('Failed to start checkout');
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    setSubLoading(true);
+    try {
+      const response = await fetch('/api/stripe/cancel-subscription/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`,
+        },
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSuccess(data.message);
+        fetchSubscription();
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Failed to cancel subscription');
+    } finally {
+      setSubLoading(false);
     }
   };
 
@@ -330,28 +405,48 @@ const ProfilePage = () => {
               <div className="section-card">
                 <h3>Current Plan</h3>
                 <div className="current-plan">
-                  <span className="plan-name">Free</span>
+                  <span className="plan-name">
+                    {subscription?.subscribed ? 'Premium' : 'Free'}
+                  </span>
                   <span className="plan-status">Active</span>
                 </div>
                 <p className="plan-description">
-                  Basic access with limited features
+                  {subscription?.subscribed
+                    ? `Your premium subscription is active${subscription.current_period_end ? ` until ${new Date(subscription.current_period_end).toLocaleDateString()}` : ''}.`
+                    : 'Basic access with limited features'}
                 </p>
+                {subscription?.subscribed && (
+                  <button
+                    className="delete-btn"
+                    onClick={handleCancelSubscription}
+                    disabled={subLoading}
+                    style={{ marginTop: '12px' }}
+                  >
+                    {subLoading ? 'Processing...' : 'Cancel Subscription'}
+                  </button>
+                )}
               </div>
-              <div className="section-card premium-card">
-                <div className="premium-header">
-                  <Crown size={32} />
-                  <h3>Upgrade to Premium</h3>
+              {!subscription?.subscribed && (
+                <div className="section-card premium-card">
+                  <div className="premium-header">
+                    <Crown size={32} />
+                    <h3>Upgrade to Premium</h3>
+                  </div>
+                  <ul className="premium-features">
+                    <li>Unlimited chats</li>
+                    <li>Create unlimited characters</li>
+                    <li>Priority support</li>
+                    <li>Exclusive features</li>
+                  </ul>
+                  <button
+                    className="upgrade-btn"
+                    onClick={handleUpgrade}
+                    disabled={subLoading}
+                  >
+                    {subLoading ? 'Redirecting...' : 'Upgrade Now - $9.99/month'}
+                  </button>
                 </div>
-                <ul className="premium-features">
-                  <li>Unlimited chats</li>
-                  <li>Create unlimited characters</li>
-                  <li>Priority support</li>
-                  <li>Exclusive features</li>
-                </ul>
-                <button className="upgrade-btn">
-                  Upgrade Now - $9.99/month
-                </button>
-              </div>
+              )}
             </div>
           )}
         </div>

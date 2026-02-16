@@ -40,3 +40,29 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.sender}: {self.content[:50]}..."
+
+
+class Subscription(models.Model):
+    """Tracks a user's Stripe subscription."""
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('canceled', 'Canceled'),
+        ('past_due', 'Past Due'),
+        ('incomplete', 'Incomplete'),
+        ('trialing', 'Trialing'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='subscription')
+    stripe_customer_id = models.CharField(max_length=255, blank=True)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='incomplete')
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.status}"
+
+    @property
+    def is_active(self):
+        return self.status in ('active', 'trialing')

@@ -6,10 +6,13 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import make_password
 import jwt
+import stripe
 from django.conf import settings
-from datetime import datetime, timedelta
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+from datetime import datetime, timedelta, timezone
 from functools import wraps
-from .models import Conversation
+from .models import Conversation, Subscription
 
 
 def get_user_from_token(request):
@@ -218,3 +221,170 @@ def recent_chats(request):
         })
 
     return Response({'chats': chats})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def create_checkout_session(request):
+    """Create a Stripe Checkout Session for subscription."""
+    user = get_user_from_token(request)
+    if not user:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        subscription = Subscription.objects.filter(user=user).first()
+
+        if subscription and subscription.stripe_customer_id:
+            customer_id = subscription.stripe_customer_id
+        else:
+            customer = stripe.Customer.create(
+                email=user.email,
+                metadata={'user_id': user.id}
+            )
+            customer_id = customer.id
+
+            if not subscription:
+                subscription = Subscription.objects.create(
+                    user=user,
+                    stripe_customer_id=customer_id,
+                )
+            else:
+                subscription.stripe_customer_id = customer_id
+                subscription.save()
+
+        if subscription.is_active:
+            return Response({'error': 'Already subscribed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price': settings.STRIPE_PRICE_ID,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=request.build_absolute_uri('/profile?tab=subscription&status=success'),
+            cancel_url=request.build_absolute_uri('/profile?tab=subscription&status=canceled'),
+            metadata={'user_id': user.id},
+        )
+
+        return Response({'checkout_url': checkout_session.url})
+
+    except stripe.error.StripeError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@csrf_exempt
+def stripe_webhook(request):
+    """Handle Stripe webhook events."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    payload = request.body
+    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        return HttpResponse(status=400)
+    except stripe.error.SignatureVerificationError:
+        return HttpResponse(status=400)
+
+    event_type = event['type']
+    data = event['data']['object']
+
+    if event_type == 'checkout.session.completed':
+        customer_id = data.get('customer')
+        subscription_id = data.get('subscription')
+        user_id = data.get('metadata', {}).get('user_id')
+
+        if user_id:
+            try:
+                sub, created = Subscription.objects.get_or_create(
+                    user_id=int(user_id),
+                    defaults={'stripe_customer_id': customer_id}
+                )
+                sub.stripe_subscription_id = subscription_id
+                sub.stripe_customer_id = customer_id
+                sub.status = 'active'
+                sub.save()
+            except Exception as e:
+                print(f"Webhook error (checkout.session.completed): {e}")
+
+    elif event_type == 'customer.subscription.updated':
+        subscription_id = data.get('id')
+        sub_status = data.get('status')
+        current_period_end = data.get('current_period_end')
+
+        try:
+            sub = Subscription.objects.get(stripe_subscription_id=subscription_id)
+            sub.status = sub_status
+            if current_period_end:
+                sub.current_period_end = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
+            sub.save()
+        except Subscription.DoesNotExist:
+            pass
+
+    elif event_type == 'customer.subscription.deleted':
+        subscription_id = data.get('id')
+        try:
+            sub = Subscription.objects.get(stripe_subscription_id=subscription_id)
+            sub.status = 'canceled'
+            sub.save()
+        except Subscription.DoesNotExist:
+            pass
+
+    return HttpResponse(status=200)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def subscription_status(request):
+    """Get current user's subscription status."""
+    user = get_user_from_token(request)
+    if not user:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        sub = Subscription.objects.get(user=user)
+        return Response({
+            'subscribed': sub.is_active,
+            'status': sub.status,
+            'current_period_end': sub.current_period_end.isoformat() if sub.current_period_end else None,
+        })
+    except Subscription.DoesNotExist:
+        return Response({
+            'subscribed': False,
+            'status': 'none',
+            'current_period_end': None,
+        })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def cancel_subscription(request):
+    """Cancel the user's subscription at period end."""
+    user = get_user_from_token(request)
+    if not user:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        sub = Subscription.objects.get(user=user)
+        if not sub.stripe_subscription_id:
+            return Response({'error': 'No active subscription'}, status=status.HTTP_400_BAD_REQUEST)
+
+        stripe.Subscription.modify(
+            sub.stripe_subscription_id,
+            cancel_at_period_end=True,
+        )
+
+        return Response({'message': 'Subscription will cancel at end of billing period'})
+
+    except Subscription.DoesNotExist:
+        return Response({'error': 'No subscription found'}, status=status.HTTP_404_NOT_FOUND)
+    except stripe.error.StripeError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

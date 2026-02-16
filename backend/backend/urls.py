@@ -3,7 +3,10 @@ from django.urls import path, re_path
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.conf.urls.static import static
-from chat.views import recent_chats, register, login, get_profile, update_profile, delete_account
+from chat.views import (
+    recent_chats, register, login, get_profile, update_profile, delete_account,
+    create_checkout_session, stripe_webhook, subscription_status, cancel_subscription
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -15,6 +18,11 @@ urlpatterns = [
     path('api/auth/profile/delete/', delete_account, name='delete_account'),
     # Chat API routes
     path('api/chats/recent/', recent_chats, name='recent_chats'),
+    # Stripe API routes
+    path('api/stripe/create-checkout-session/', create_checkout_session, name='create_checkout_session'),
+    path('api/stripe/webhook/', stripe_webhook, name='stripe_webhook'),
+    path('api/stripe/subscription-status/', subscription_status, name='subscription_status'),
+    path('api/stripe/cancel-subscription/', cancel_subscription, name='cancel_subscription'),
 ]
 
 # Serve static files in development

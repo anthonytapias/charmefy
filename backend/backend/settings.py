@@ -19,6 +19,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # DeepSeek API Key
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', 'sk-4931733156ef421ab94c74a5afedf9c1')
 
+# Stripe settings
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_PRICE_ID = os.getenv('STRIPE_PRICE_ID', '')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
